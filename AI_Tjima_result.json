@@ -1,0 +1,85 @@
+{
+  "best": {
+    "body": 0.45,
+    "breaker": 3.1,
+    "aggro": 2.7,
+    "removal": 1.63,
+    "blocker": 2.59,
+    "defenseNeed": 3.83,
+    "link": 3.04,
+    "costEff": 0.16,
+    "freeBonus": 3.65,
+    "extjia": 3.94,
+    "manaHit": 0.6,
+    "sevenChain": 4.23,
+    "mana4": 1.01,
+    "atkShield": 2.19,
+    "atkAggro": 5.07,
+    "stRisk": 0.43,
+    "defShield": 1.57,
+    "bigNum": 0.31
+  },
+  "history": [
+    {
+      "gen": 1,
+      "parentRate": 0.512,
+      "childRate": 0.488,
+      "adopted": false
+    },
+    {
+      "gen": 2,
+      "parentRate": 0.52,
+      "childRate": 0.48,
+      "adopted": false
+    },
+    {
+      "gen": 3,
+      "parentRate": 0.506,
+      "childRate": 0.494,
+      "adopted": false
+    },
+    {
+      "gen": 4,
+      "parentRate": 0.498,
+      "childRate": 0.502,
+      "adopted": true
+    },
+    {
+      "gen": 5,
+      "parentRate": 0.46,
+      "childRate": 0.54,
+      "adopted": true
+    },
+    {
+      "gen": 6,
+      "parentRate": 0.488,
+      "childRate": 0.512,
+      "adopted": true
+    },
+    {
+      "gen": 7,
+      "parentRate": 0.478,
+      "childRate": 0.522,
+      "adopted": true
+    },
+    {
+      "gen": 8,
+      "parentRate": 0.488,
+      "childRate": 0.512,
+      "adopted": true
+    },
+    {
+      "gen": 9,
+      "parentRate": 0.51,
+      "childRate": 0.49,
+      "adopted": false
+    },
+    {
+      "gen": 10,
+      "parentRate": 0.492,
+      "childRate": 0.508,
+      "adopted": true
+    }
+  ],
+  "generatedAt": "2026-05-30T14:22:58.303Z"
+}
