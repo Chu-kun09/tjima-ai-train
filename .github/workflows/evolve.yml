@@ -1,0 +1,34 @@
+name: Evolve CPU AI
+
+on:
+  schedule:
+    - cron: '17 3 * * *'    # 毎日 UTC 3:17（日本時間 12:17頃）
+  workflow_dispatch:        # 手動実行ボタン
+
+permissions:
+  contents: write
+
+jobs:
+  evolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run evolution
+        run: node AI_Tjima.js evolve 10 500
+      - name: Apply learned params
+        run: node apply_result.js
+      - name: Commit & push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add AI_Tjima_result.json tjima_cpu.html
+          if git diff --cached --quiet; then
+            echo "変化なし"
+          else
+            git commit -m "Auto-evolve $(date -u +%Y-%m-%d)"
+            git push
+          fi
