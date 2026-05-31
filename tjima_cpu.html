@@ -1063,10 +1063,10 @@ function execDirectWithBlock(atk,p,blockers){
       renderAll();
     }else{
       // ローカル: 防御側向けにモーダル表示
-      showSimpleModal(`🛡 ${atkLabel(atk)} が攻撃！ ブロックしますか？`,[
-        {label:'ブロックする',cls:'g',fn:()=>{closeModal();showBlockPicker(atk,p,blockers);}},
+      showSimpleModal(`🛡 ${atkLabel(atk)} がダイレクトアタック！ ブロックしますか？`,[
+        {label:'ブロックする',cls:'g',fn:()=>{closeModal();showBlockPicker(atk,p,blockers,{type:'direct'});}},
         {label:'ブロックしない → ダイレクト',cls:'r',fn:()=>{closeModal();execDirectAttack(atk,p);}},
-      ],`ブロッカー: ${blockers.map(c=>CJ[c.color]+c.num).join(' / ')}`,opp);
+      ],`${atkLabel(atk)} → あなたに直接攻撃（シールド0）｜ブロッカー: ${blockers.map(c=>CJ[c.color]+c.num).join(' / ')}`,opp);
     }
   }else{
     if(ONLINE.enabled){
@@ -1106,19 +1106,29 @@ function execShieldAttack(atk,p){
     // ローカル: 従来通り
     const blockers=G.players[opp].field.filter(c=>(c.num===1||c.num===3)&&!c.tapped&&(!c.linkedWith||c.linkRoot));
     if(blockers.length){
-      showSimpleModal(`🛡 ${atkLabel(atk)} が攻撃！ ブロックしますか？`,[
-        {label:'ブロックする',cls:'g',fn:()=>{closeModal();showBlockPicker(atk,p,blockers);}},
+      showSimpleModal(`🛡 ${atkLabel(atk)} がシールドを攻撃！ ブロックしますか？`,[
+        {label:'ブロックする',cls:'g',fn:()=>{closeModal();showBlockPicker(atk,p,blockers,{type:'shield'});}},
         {label:'ブロックしない',cls:'r',fn:()=>{closeModal();doShieldBreak(atk,p);}},
-      ],`ブロッカー: ${blockers.map(c=>CJ[c.color]+c.num).join(' / ')}`,opp);
+      ],`${atkLabel(atk)}（ブレイク${cpuBreakerCountLabel(atk)}）→ あなたのシールド｜ブロッカー: ${blockers.map(c=>CJ[c.color]+c.num).join(' / ')}`,opp);
     }else{
       doShieldBreak(atk,p);
     }
   }
 }
 
-function showBlockPicker(atk,p,blockers){
+function showBlockPicker(atk,p,blockers,attackInfo){
   const opp=p===1?2:1;
-  showCardPicker(`🛡 ブロッカーを選択 (${atkLabel(atk)}が攻撃)`,'選択して決定を押す',blockers,opp,false,
+  // 攻撃元 → 攻撃先 を表すラベル
+  let targetLabel='';
+  if(attackInfo){
+    if(attackInfo.type==='shield')   targetLabel='シールド';
+    else if(attackInfo.type==='direct') targetLabel='ダイレクト（本体）';
+    else if(attackInfo.type==='creature'&&attackInfo.card) targetLabel=`${CJ[attackInfo.card.color]}${attackInfo.card.num}`;
+  }
+  const title = targetLabel
+    ? `🛡 ${atkLabel(atk)} → ${targetLabel} へブロッカーを選択`
+    : `🛡 ブロッカーを選択 (${atkLabel(atk)}が攻撃)`;
+  showCardPicker(title,'どのブロッカーで受けるか選択して決定',blockers,opp,false,
     (blocker)=>{
       closeModal();
       blocker.tapped=true;             // ブロックしたブロッカーはタップされる
@@ -1129,6 +1139,12 @@ function showBlockPicker(atk,p,blockers){
     [{label:'ブロックしない',cls:'r',fn:()=>{closeModal();doShieldBreak(atk,p);}}],
     opp  // forPlayer = 防御側
   );
+}
+// ブレイク数の表示用ラベル（1/2/3）
+function cpuBreakerCountLabel(card){
+  if(card.num===0)return '3';
+  if(card.num===7||card.num===9)return '2';
+  return '1';
 }
 
 function doShieldBreak(atk,p){
@@ -1219,8 +1235,8 @@ function showCreaturePicker(atk,p){
           setBar('相手がブロックを検討中...',[]);
           renderAll();
         }else{
-          showSimpleModal(`🛡 ブロックしますか？`,[
-            {label:'ブロックする',cls:'g',fn:()=>{closeModal();showBlockPicker(atk,p,untappedBlockers);}},
+          showSimpleModal(`🛡 ${atkLabel(atk)} が ${CJ[card.color]}${card.num} を攻撃！ ブロックしますか？`,[
+            {label:'ブロックする',cls:'g',fn:()=>{closeModal();showBlockPicker(atk,p,untappedBlockers,{type:'creature',card:card});}},
             {label:'ブロックしない',cls:'r',fn:()=>{
               closeModal();
               fxAttack(atk,p,card,opp);
@@ -1435,6 +1451,7 @@ function showHirabonDeclareModal(p,isAttack,atkCardRef){
           showHirabonTargetModal(atkCardRef,p);
         },600);
       }else{
+        if(stContinueOrPhase(p))return;   // ST解決モードなら次のSTへ
         checkExTjia(p);
         setTimeout(()=>{if(G.phase==='summon')phaseSummon();},400);
       }
@@ -1732,7 +1749,10 @@ function handle0OnSummon(p,card){
   const pl=G.players[p];
   const hasFF=pl.field.some(c=>c.linkedWith&&c.num===5&&c.linkedWith.num===5&&c.id!==card.id);
   const has5=pl.field.some(c=>c.num===5&&c.id!==card.id);
-  if(!pl.graveyard.length||(!has5&&!hasFF)){checkExTjia(p);setTimeout(()=>{if(G.phase==='summon')phaseSummon();},400);return;}
+  if(!pl.graveyard.length||(!has5&&!hasFF)){
+    if(stContinueOrPhase(p))return;
+    checkExTjia(p);setTimeout(()=>{if(G.phase==='summon')phaseSummon();},400);return;
+  }
   pick5Grave(p,hasFF?5:1);
 }
 
@@ -2202,7 +2222,7 @@ function showSTMultiModal(player){
     row.innerHTML=`
       <div class="mcard ${st.card.color}">${st.card.num}</div>
       <div style="flex:1">
-        <div class="iname">${CJ[st.card.color]}0 ✨${name}</div>
+        <div class="iname">${CJ[st.card.color]}${st.card.num} ✨${name}</div>
         <div class="idesc">${desc}</div>
       </div>`;
     const btnsDiv=document.createElement('div');
@@ -2211,12 +2231,10 @@ function showSTMultiModal(player){
     useBtn.className='btn g';useBtn.style.fontSize='12px';useBtn.style.padding='6px 10px';
     useBtn.textContent='発動';
     useBtn.onclick=()=>{
-      closeModal();
-      const fx8=(st.card.num===8)?'spell':null;
-      activateST(st);
+      // このSTだけを発動キューに入れ、残りはまた選ばせる。
+      // 6など追加選択が要るSTも、完了してから次へ進むよう順次解決する。
       G.pendingST=G.pendingST.filter(s=>s.card.id!==st.card.id);
-      if(G.pendingST.length){setTimeout(()=>showSTMultiModal(player),300);}
-      else stFinish(fx8);
+      resolveSTThenContinue(st, player);
     };
     const handBtn=document.createElement('button');
     handBtn.className='btn n';handBtn.style.fontSize='12px';handBtn.style.padding='6px 10px';
@@ -2225,7 +2243,7 @@ function showSTMultiModal(player){
       G.players[player].hand.push(st.card);
       G.pendingST=G.pendingST.filter(s=>s.card.id!==st.card.id);
       renderAll();
-      if(G.pendingST.length){showSTMultiModal(player);}
+      if(G.pendingST.filter(s=>s.player===player).length){showSTMultiModal(player);}
       else{closeModal();stFinish();}
     };
     btnsDiv.appendChild(useBtn);
@@ -2234,20 +2252,56 @@ function showSTMultiModal(player){
     listEl.appendChild(row);
   });
 
-  // 全部手札へボタン
+  // 全部発動ボタン（順番に全部解決する）
   const btnsEl=document.getElementById('modal-btns');
   btnsEl.innerHTML='';
+  const allUseBtn=document.createElement('button');
+  allUseBtn.className='btn g';allUseBtn.textContent='全部発動';
+  allUseBtn.onclick=()=>{
+    const toActivate=G.pendingST.filter(s=>s.player===player);
+    G.pendingST=G.pendingST.filter(s=>s.player!==player);
+    resolveSTChain(toActivate, player);
+  };
   const allHandBtn=document.createElement('button');
   allHandBtn.className='btn n';allHandBtn.textContent='全部手札へ';
   allHandBtn.onclick=()=>{
     sts.forEach(st=>{G.players[player].hand.push(st.card);});
-    G.pendingST=[];
+    G.pendingST=G.pendingST.filter(s=>s.player!==player);
     closeModal();renderAll();stFinish();
   };
+  btnsEl.appendChild(allUseBtn);
   btnsEl.appendChild(allHandBtn);
 
   document.getElementById('modal-overlay').classList.add('show');
   applyModalDir(player);
+}
+
+// 1枚のSTを発動し、その追加選択(6のバウンス等)が完了してから次へ進む。
+// 残りの発動待ちSTがあれば再びマルチモーダルを表示する。
+function resolveSTThenContinue(st, player){
+  closeModal();
+  const fx8=(st.card.num===8)?'spell':null;
+  // 6/2/7 は追加選択モーダルを開くので、その完了後に次へ進めるようコールバックを仕込む
+  G._stContinue=()=>{
+    G._stContinue=null;
+    const remain=G.pendingST.filter(s=>s.player===player);
+    if(remain.length){ setTimeout(()=>showSTMultiModal(player),250); }
+    else stFinish(fx8);
+  };
+  activateST(st, true); // 第2引数=複数ST解決モード（完了時に_stContinueを呼ぶ）
+}
+
+// 複数STを順番に全部発動する（「全部発動」用）。
+function resolveSTChain(list, player){
+  closeModal();
+  let idx=0;
+  function next(){
+    if(idx>=list.length){ stFinish(); return; }
+    const st=list[idx++];
+    G._stContinue=()=>{ G._stContinue=null; setTimeout(next,200); };
+    activateST(st, true);
+  }
+  next();
 }
 
 // STが全部終わったあとの後処理
@@ -2260,7 +2314,18 @@ function stFinish(fxType){
     renderAll();if(G.phase==='attack')setTimeout(phaseAttack,300);
   }
 }
-function activateST(st){
+// ST由来(2/7/0など)の追加選択が完了したときの分岐:
+//  複数ST解決モードなら次のSTへ、そうでなければ通常のフェーズ進行へ。
+function stContinueOrPhase(p){
+  if(G._stMultiMode && G._stContinue){
+    const cont=G._stContinue; G._stMultiMode=false;
+    checkExTjia(p);
+    cont();
+    return true;   // ST継続を処理した
+  }
+  return false;    // 通常進行に任せる
+}
+function activateST(st, multiMode){
   const pl=G.players[st.player];
   if(st.card.num===8){
     const opp=st.player===1?2:1;
@@ -2269,7 +2334,7 @@ function activateST(st){
     fxSpell(st.player);
     toast(`⚡ ST片スパ！ ${ONLINE.names[opp]||'P'+opp}フィールドを全タップ`);
     renderAll();
-    // pushStateはactivateST呼び出し元(processST/showSTMultiModal)のstFinishで行う
+    if(multiMode && G._stContinue){ G._stContinue(); }
     return;
   }
   st.card.tapped=false;st.card.summonedThisTurn=false;
@@ -2277,15 +2342,17 @@ function activateST(st){
   fxSummon(st.player,st.card);
   toast(`✨ ST発動！ ${CJ[st.card.color]}${st.card.num}が場に`);
   renderAll();
+  // 追加選択が必要なST(2/6/7/0)は、その完了時に_stContinueが呼ばれるよう印を付ける
+  G._stMultiMode = !!multiMode;
   if(st.card.num===2){showHirabonDeclareModal(st.player,false,null);return;}
   if(st.card.num===6){
-    // 6の効果後にpushして攻撃側に反映してからバウンス選択
     show6BounceModal(st.player);
     return;
   }
   if(st.card.num===7){show7PickModal(st.player);return;}
   if(st.card.num===0){handle0OnSummon(st.player,st.card);return;}
-  // その他: pushStateして攻撃側に反映
+  // その他: 追加選択なし。複数STモードなら即継続
+  if(multiMode && G._stContinue){ G._stContinue(); return; }
   if(ONLINE.enabled){pushState();}
 }
 
@@ -2376,6 +2443,13 @@ function show6LinkedChoiceModal(p, opp, cardA, cardB){
 
 // 6効果後の共通後処理
 function after6Bounce(p){
+  // 複数ST解決モード中なら、次のSTへ進む
+  if(G._stMultiMode && G._stContinue){
+    const cont=G._stContinue; G._stMultiMode=false;
+    checkExTjia(p);
+    cont();
+    return;
+  }
   if(ONLINE.enabled&&G.phase==='attack'){
     G.onlinePhase='attack-continue';G._pendingAtk=null;
     pushState();
@@ -3959,10 +4033,24 @@ function isCpu(p){ return CPU.enabled && !ONLINE.enabled && Number(p)===Number(C
 
 /* ════════════════ 2. スコアリング用の重み ════════════════ */
 const CPU_W = {
-  body:0.6, breaker:3.0, aggro:4.0, removal:1.4, blocker:2.5, defenseNeed:3.0,
-  link:4.0, costEff:0.25, freeBonus:3.0, extjia:6.0, manaHit:0.5, sevenChain:5.0,
-  mana4:1.5, atkShield:4.0, atkAggro:5.0, stRisk:0.6, defShield:3.0,
-  bigNum:0.4,   // 大きい数字（強いカード）を召喚で優先する加点
+ "body": 0.54,
+    "breaker": 2.95,
+    "aggro": 3.07,
+    "removal": 1.69,
+    "blocker": 1.65,
+    "defenseNeed": 2.55,
+    "link": 3.38,
+    "costEff": 0.19,
+    "freeBonus": 4.06,
+    "extjia": 7.91,
+    "manaHit": 0.43,
+    "sevenChain": 5.65,
+    "mana4": 1.6,
+    "atkShield": 3.24,
+    "atkAggro": 5.46,
+    "stRisk": 0.38,
+    "defShield": 3.28,
+    "bigNum": 0.41,   // 大きい数字（強いカード）を召喚で優先する加点
 };
 
 /* ════════════════ 3. 盤面評価・共通ヘルパー ════════════════ */
