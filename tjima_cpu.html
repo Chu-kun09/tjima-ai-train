@@ -4003,6 +4003,31 @@ function cpuRemovalValue(card){
   if(card.linkedWith)v+=2;
   return v;
 }
+/* 相手が次ターンにヒラボン(2)を使ってくる確率を推定する（0〜1）。
+ *  ・相手フィールドに2がある → アタック時に確実に宣言できる（高確率）
+ *  ・相手フィールドに2が無い → 手札から召喚が必要。相手のマナ(≥2)と手札の有無、
+ *    および「場に見えている2の枚数」から、まだ持っている見込みを概算する。
+ *    すでに複数の2が場/墓地に出ていれば、残りは少ない＝低確率とする。 */
+function cpuHirabonThreatProb(p){
+  const opp=(p===1)?2:1, en=G.players[opp];
+  // フィールドに2がいる → ほぼ確実に攻撃時ヒラボン
+  if(en.field.some(c=>c.num===2&&(!c.linkedWith||c.linkRoot))) return 0.95;
+  // 手札から召喚する場合：マナ2以上＆手札があることが前提
+  const canAfford = totalMana(opp)>=2;
+  const hasHand = en.hand.length>0;
+  if(!canAfford || !hasHand) return 0.05;
+  // 2は全部で4枚（番号2×4色）。見えている(場+マナ+自分の墓地で確認できる)2を数えて残数から確率化
+  let seen=0;
+  [G.players[1],G.players[2]].forEach(pl=>{
+    ['field','mana','graveyard'].forEach(z=>{ pl[z].forEach(c=>{ if(c.num===2)seen++; }); });
+  });
+  const remaining=Math.max(0,4-seen);           // まだ出ていない2の枚数
+  if(remaining===0) return 0.03;                 // 全部使われた→ほぼ無い
+  // 残数が多いほど・相手の手札が多いほど引いて持っている見込みが上がる
+  const base=remaining/4;                        // 0.25〜1.0
+  const handFactor=Math.min(1,en.hand.length/5); // 手札が多いほど持っている可能性
+  return Math.min(0.6, base*handFactor*0.8);     // 手札からの場合は最大0.6（場にある場合より低い）
+}
 function cpuBreakerCount(card){
   if(card.num===0)return 3;
   if(card.num===7||card.num===9)return 2;
@@ -4010,6 +4035,11 @@ function cpuBreakerCount(card){
 }
 function cpuHirabonBest(ctx){
   const {me,en}=ctx; let best={num:0,gain:-Infinity};
+  // 相手の未タップブロッカーの番号ごとの枚数（除去できると攻撃が通る）
+  const blkByNum={};
+  (ctx.oppUntappedBlockers||[]).forEach(c=>{ blkByNum[c.num]=(blkByNum[c.num]||0)+1; });
+  const myAttackers=me.field.filter(c=>!c.tapped&&(!c.summonedThisTurn||c.speedAttacker)&&(!c.linkedWith||c.linkRoot));
+  const totalBlockers=(ctx.oppUntappedBlockers||[]).length;
   for(let n=0;n<=9;n++){
     let oppLoss=0,myLoss=0;
     en.field.forEach(c=>{if(c.num===n)oppLoss+=cpuRemovalValue(c);});
@@ -4017,7 +4047,13 @@ function cpuHirabonBest(ctx){
     me.field.forEach(c=>{if(c.num===n)myLoss+=(n===4?0:cpuRemovalValue(c));});  // 4は破壊→マナ送りなのでロス0
     me.mana .forEach(c=>{if(c.num===n)myLoss+=cpuRemovalValue(c)*CPU_W.manaHit;});
     if(n===2)myLoss+=2;
-    const gain=oppLoss-myLoss;
+    let gain=oppLoss-myLoss;
+    // ブロッカー除去で攻撃が通るなら、突破価値を gain に上乗せして宣言番号を選ぶ判断に反映
+    if(blkByNum[n] && myAttackers.length){
+      const remaining=totalBlockers-blkByNum[n];
+      if(remaining===0) gain += 5 + myAttackers.length*1.5; // 全ブロッカー除去＝攻撃が通る
+      else gain += blkByNum[n]*1.5;
+    }
     if(gain>best.gain)best={num:n,gain};
   }
   return best;
@@ -4055,7 +4091,22 @@ function cpuScoreCard(p,card,ctx){
         if(after>=4)score+=CPU_W.extjia*2; else score+=CPU_W.extjia*(after/4);
       }
       if(ctx.me.hand.some(c=>c.num===5&&c.color===card.color&&canSummon(p,c)))score-=5;
-      score-=ctx.me.field.filter(c=>c.num===0).length*3;
+      // ── 0の一斉召喚リスク（相手の2による一掃）──────────────────────────
+      // 相手が次ターンに2を出せる可能性が高いほど、0をまとめて場に出すのは危険。
+      // 「場に出す0が増えるほど」「相手が2を持てる状況なほど」減点を強める。
+      const zerosOnField=ctx.me.field.filter(c=>c.num===0).length;
+      // 相手が2を出せる蓋然性: 場/手札に2が見えていれば確定的、見えなくてもマナと手札があれば可能性
+      const oppCanPlay2Now=ctx.en.field.some(c=>c.num===2)||ctx.en.hand.some(c=>c.num===2);
+      const oppMightDraw2=(ctx.en.hand.length>0)&&(totalMana(ctx.opp)>=2||ctx.en.mana.length>=2);
+      // 4色そろえばエクTジアで即勝ちなので、ラスト1枚(4色目)はリスク無視で出す
+      const isFinishingColor=!zc.has(card.color)&&(zc.size+1>=4);
+      if(!isFinishingColor){
+        let risk=0;
+        if(oppCanPlay2Now) risk=(zerosOnField+1)*4;       // 確定的に2がある→強く分割を促す
+        else if(oppMightDraw2) risk=(zerosOnField)*2;     // 引かれる可能性→場に既に0があるほど控える
+        score-=risk;
+      }
+      score-=zerosOnField*1; // 従来のまとめ置き微減点（残し）
       if(ctx.me.field.some(c=>c.num===5)&&ctx.me.graveyard.length)score+=1.5;
       if(inControl)score+=atkBonus*0.5; // 有利時はエクTジア/トリプルを加速
       break;
@@ -4071,11 +4122,33 @@ function cpuScoreCard(p,card,ctx){
       const oppHas0   =ctx.en.field.some(c=>c.num===0)||ctx.en.mana.some(c=>c.num===0);
       const oppHas9   =ctx.en.field.some(c=>c.num===9)||ctx.en.mana.some(c=>c.num===9);
       const oppHasLink=ctx.en.field.some(c=>c.linkedWith&&c.linkRoot);
+      // ── ブロッカー除去でダイレクト/追加ブレイクが通る価値 ──────────────
+      // 2の宣言で相手の未タップブロッカーを除去できると、こちらの攻撃が止められなくなる。
+      // 「除去後に自分の攻撃可能クリーチャーで何点入るか」を攻撃価値として加算する。
+      const myAttackers=ctx.me.field.filter(c=>canAttack(p,c));
+      const oppBlockerNums=ctx.oppUntappedBlockers.map(c=>c.num);
+      // 宣言番号(b.num)が相手ブロッカーの番号と一致する＝そのブロッカーを除去できる
+      const clearsBlocker=oppBlockerNums.includes(b.num);
+      let breakthroughBonus=0;
+      if(clearsBlocker && myAttackers.length){
+        const removedBlockers=ctx.oppUntappedBlockers.filter(c=>c.num===b.num).length;
+        const remainingBlockers=ctx.oppUntappedBlockers.length-removedBlockers;
+        const myBreakTotal=myAttackers.reduce((s,c)=>s+cpuBreakerCount(c),0);
+        if(remainingBlockers===0){
+          // 全ブロッカー除去 → 攻撃が通る。シールドを割り切ってダイレクトなら勝ち級の価値
+          if(myBreakTotal>=ctx.oppShields){
+            breakthroughBonus=CPU_W.atkShield*ctx.oppShields + CPU_W.aggro*5 + 8; // ダイレクト勝利圏
+          }else{
+            breakthroughBonus=myBreakTotal*(CPU_W.atkShield+ctx.aggro*CPU_W.atkAggro);
+          }
+        }
+      }
       // 緊急時（dangerLevel≤0）は利益>0なら召喚して少しでも脅威を除去
       const gainThreshold=ctx.dangerLevel<=0?0:8;
-      const hasTarget =oppHas0||oppHas9||oppHasLink||b.gain>=gainThreshold;
+      const hasTarget =oppHas0||oppHas9||oppHasLink||clearsBlocker||b.gain>=gainThreshold;
       if(hasTarget){
         score+=b.gain*CPU_W.removal;
+        score+=breakthroughBonus;
         score+=defBonus*0.8; // 危機時・相手0の破壊は防御と同等の最優先行動
       }else{
         return {score:-5, plan:null, cost};
@@ -4210,23 +4283,110 @@ function cpuManaUtility(p,card,ctx){
   }
   return v;
 }
+// チャージ選択（look-ahead方式）
+// 「どのカードをチャージすれば、そのターンに最も価値の高い召喚ができるか」を
+// 全パターン（各手札カードをチャージ / チャージしない）でシミュレートして決める。
+// これは人間の「このターン出したいカードから逆算してチャージを決める」思考に対応。
 function cpuChooseManaCharge(p,opts={}){
-  const ctx=cpuEvalBoard(p), me=G.players[p], hand=me.hand;
+  const me=G.players[p], hand=me.hand;
   if(!hand.length)return null;
-  const cur=totalMana(p);
-  const wantCosts=hand.map(c=>(c.num===8?4:c.num===0?0:c.num));
-  const target=Math.max(4,Math.min(9,Math.max(0,...wantCosts)));
-  const need=Math.max(0,target-cur);
-  const urgency=need>0?1+need*0.4:0.5;
-  const hf=Math.min(1.5,hand.length/4);
-  let best=null;
-  for(const card of hand){
-    const keep=cpuKeepValue(p,card,ctx), util=cpuManaUtility(p,card,ctx);
-    const cs=util*urgency*hf-keep;
-    if(!best||cs>best.chargeScore)best={card,chargeScore:cs,keep,util};
+
+  // 指定したマナ構成での「そのターンに出せる召喚の合計価値」を概算する
+  // （マナを仮に置いた状態でcpuScoreCardを評価し、出せるカードの上位を貪欲に足す）
+  // さらに「召喚し終えた後、相手の次ターンに殴り倒されるリスク」を差し引く。
+  function evalWithMana(extraManaCard){
+    // 仮想的にマナを追加した状態を作る（破壊的変更を避けるためバックアップ）
+    const manaBackup=me.mana.slice();
+    const handBackup=me.hand.slice();
+    if(extraManaCard){
+      me.mana=me.mana.concat([extraManaCard]);
+      me.hand=me.hand.filter(c=>c.id!==extraManaCard.id);
+    }
+    // この状態で各手札カードのスコアを計算し、コスト内で出せる最大スコアを貪欲に見積もる
+    const ctx2=cpuEvalBoard(p);
+    let availMP=availMana(p);
+    const scored=me.hand.map(c=>{
+      const r=cpuScoreCard(p,c,ctx2);
+      return {card:c,score:r.score,cost:(r.cost!==undefined?r.cost:getSummonCost(p,c))};
+    }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
+    // 貪欲にマナの許す範囲で召喚価値を合計しつつ、出す予定のカードを記録
+    let total=0, used=0; const willPlay=[];
+    for(const s of scored){
+      if(used+s.cost<=availMP){ total+=s.score; used+=s.cost; willPlay.push(s.card); }
+    }
+    // ── 次ターン被弾リスク ──────────────────────────────────────────────
+    // 今ターンこれらを召喚した後、自分の守り(シールド + 場に残る&新規のブロッカー)が
+    // 相手の次ターンの打点に耐えられるか。耐えられないならリスクとして大きく減点。
+    const opp=(p===1)?2:1;
+    const oppBreak=G.players[opp].field.filter(c=>!c.linkedWith||c.linkRoot)
+                     .reduce((s,c)=>s+cpuBreakerCount(c),0);
+    const myShields=me.shields.filter(Boolean).length;
+    // 場に既にいるブロッカー + 今ターン召喚予定のブロッカー(1/3)
+    let myBlockers=me.field.filter(c=>(c.num===1||c.num===3)&&(!c.linkedWith||c.linkRoot)).length;
+    myBlockers+=willPlay.filter(c=>c.num===1||c.num===3).length;
+    // 相手のヒラボン確率：ブロッカーが同番号で複数並ぶと、まとめて消される期待損失
+    const hirabProb=cpuHirabonThreatProb(p);
+    // 召喚予定+既存で「1」「3」それぞれ何体並ぶか→多い方がヒラボンで飛ぶ想定
+    const allBlk=me.field.filter(c=>(c.num===1||c.num===3)&&(!c.linkedWith||c.linkRoot))
+                  .concat(willPlay.filter(c=>c.num===1||c.num===3));
+    const n1=allBlk.filter(c=>c.num===1).length, n3=allBlk.filter(c=>c.num===3).length;
+    const expectedBlkLoss=hirabProb*Math.max(n1,n3); // ヒラボンで失うブロッカーの期待値
+    const effectiveBlockers=Math.max(0, myBlockers - expectedBlkLoss);
+    const defense=myShields+effectiveBlockers;
+    // 守りが相手の打点を下回る＝次ターン致死の恐れ → ペナルティ
+    let riskPenalty=0;
+    if(oppBreak>0 && defense<oppBreak){
+      riskPenalty=(oppBreak-defense)*(CPU_W.defShield+CPU_W.blocker)*1.2;
+    }
+    // 復元
+    me.mana=manaBackup; me.hand=handBackup;
+    return total - riskPenalty;
   }
+
+  // 候補: 各手札カードをチャージ / チャージしない(null)
+  const noChargeProjected=evalWithMana(null);
+  let best={card:null, projected:noChargeProjected, chargeScore:0};
+  let anyChargeEnablesSummon=false;
+  for(const card of hand){
+    if(card.num===0)continue; // 0は絶対にチャージしない
+    const projected=evalWithMana(card);
+    const ctx=cpuEvalBoard(p);
+    const keep=cpuKeepValue(p,card,ctx);
+    // このチャージの正味価値 = 出せるようになる召喚価値 - そのカードを手放す損失(keep)
+    // チャージで召喚が増えても、捨てる札のkeepがそれを上回るなら見送る
+    const net=projected - keep;
+    if(net>0 && projected>noChargeProjected) anyChargeEnablesSummon=true;
+    if(net>best.chargeScore){
+      best={card,projected,chargeScore:net,keep};
+    }
+  }
+
+  // どのチャージも「今ターンの召喚価値」を増やさない（=今は何も出せない/出せる物は変わらない）
+  // → look-aheadで決められないので、将来のために最も手放してよい札を置く。
+  //   主要札(0/2/7/9/8など温存価値が高い物)は残し、keepの低い札を選ぶ。
+  if(!anyChargeEnablesSummon){
+    const cur=totalMana(p);
+    const ctx=cpuEvalBoard(p);
+    // 最も「手放してよい」札＝keepValueが最小の札を選ぶ（0は除外）
+    let lowest=null;
+    for(const card of hand){
+      if(card.num===0)continue;
+      const keep=cpuKeepValue(p,card,ctx);
+      // keepが低い札を優先。同値なら数字の小さい方(効果・打点が低い)を手放す
+      if(!lowest || keep<lowest.keep || (keep===lowest.keep && card.num<lowest.card.num)){
+        lowest={card,keep};
+      }
+    }
+    if(!lowest) return null; // 手札が0だけ等
+    // 序盤(マナ≤4)は加速のため必ず置く。中盤以降はkeepが低い札(≤3)のときだけ置く。
+    if(cur<=4 || lowest.keep<=3){
+      return {card:lowest.card, chargeScore:0};
+    }
+    return null; // 中盤以降、温存したい札しかなければ置かない
+  }
+
   const th=(opts.skipThreshold!==undefined)?opts.skipThreshold:0;
-  if(!best||best.chargeScore<th)return null;
+  if(!best.card || best.chargeScore<th && totalMana(p)>4)return null;
   return best;
 }
 
