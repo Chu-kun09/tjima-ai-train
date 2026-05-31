@@ -4262,27 +4262,38 @@ function cpuChooseBestPlay(p,minScore=0.5){
 
 /* ════════════════ 5. マナチャージ ════════════════ */
 function cpuKeepValue(p,card,ctx){
-  const earlyGame = ctx.oppCreatureCount===0 && ctx.myShields>=4; // 脅威なし＆自分も無傷＝序盤
+  // このゲームの本質：序盤は 0,1,2,3 の小型カードの組み合わせ勝負。
+  //   9 はほぼ召喚しない（コスト9・攻撃力ゲームでない）→ 積極的にチャージ要員。
+  //   5,7 は終盤に役割が出る。8 は基本チャージ要員。
+  // keep が低いほど「手放してチャージしてよい」。チャージ優先度（手放す順）は:
+  //   9 → 4 → 8 → 7 → 6 → 5 …（高数字＝マナ要員）、温存は 0,2,3,1（序盤の主役）
+  const lateGame = ctx.oppShields<=2 || ctx.myShields<=2; // 終盤＝どちらかのシールドが薄い
   let v;
   switch(card.num){
-    case 0: v=100; break;
-    case 7:{
-      // 7は連鎖前提の高コスト札。手札に複数あるなら全力温存(連鎖要員)。
-      // 1枚しか無い序盤は使いにくいのでチャージ要員に回してよい（keepを下げる）。
-      const others=G.players[p].hand.filter(c=>c.num===7&&c.id!==card.id).length;
-      if(others>=1) v=14;                  // 複数7＝連鎖の核。絶対温存
-      else if(earlyGame) v=2.5;            // 序盤の単騎7はマナ加速に回してよい
-      else v=8;                            // 中盤以降の単騎7は温存寄り
+    case 0: v=100; break;                  // コスト0で出せる・エクTジアの鍵。絶対温存
+    case 2: v=7; break;                    // 除去の要。序盤の主役なので温存
+    case 1: v=5+ctx.defenseNeed*2; break;  // ブロッカー／序盤の主役。温存寄り
+    case 3: v=5+ctx.defenseNeed*2; break;  // ブロッカー／同上
+    case 5:
+      // 終盤は5の役割(コスト軽減・0の墓地回収)が出るので温存寄り、序盤はチャージ可
+      v=lateGame?4:2;
+      if(G.players[p].field.some(c=>c.num===5))v=Math.min(v,2); // 既に場に5があれば温存不要
       break;
-    }
-    case 9: v=6; break;
-    case 8: v=1.5; break;  // 基本はチャージ要員。終盤のみ召喚する
-    case 6: v=4; break;
-    case 5: v=G.players[p].field.some(c=>c.num===5)?2:4; break;
-    case 2: v=earlyGame?7:6; break;        // 除去の要。序盤でも温存
-    case 4: v=2.5; break;
-    case 3: v=4+ctx.defenseNeed*3; break;  // ブロッカー：序盤でも最低4で温存寄りに
-    case 1: v=4+ctx.defenseNeed*3; break;  // ブロッカー：同上
+    case 6: v=lateGame?3.5:2; break;       // 終盤はバウンス役、序盤はチャージ可
+    case 7:
+      // 7は手札1枚でも、マナや墓地の7を連鎖で引ける。序盤に手札保持の必要性は低い。
+      // 終盤に連鎖フィニッシュの役割が出るので、終盤かつ複数あるときだけ温存。
+      {
+        const others=G.players[p].hand.filter(c=>c.num===7&&c.id!==card.id).length
+                    +G.players[p].mana.filter(c=>c.num===7).length
+                    +G.players[p].graveyard.filter(c=>c.num===7).length;
+        if(lateGame && others>=1) v=8;     // 終盤＆連鎖の弾あり＝温存
+        else v=1.8;                        // それ以外はチャージ要員
+      }
+      break;
+    case 8: v=1.5; break;                  // 基本チャージ要員（手札召喚は限定的な勝ち筋のみ）
+    case 4: v=1.2; break;                  // 破壊されてもマナに戻る＝最もマナ向き
+    case 9: v=1.0; break;                  // ほぼ召喚しない＝最優先でチャージ要員
     default: v=card.num*0.5;
   }
   return v;
