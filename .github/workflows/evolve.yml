@@ -21,7 +21,7 @@ jobs:
         run: node AI_Tjima.js evolve 10 500
       - name: Apply learned params
         run: node apply_result.js
-      - name: Commit & push if changed
+     - name: Commit & push if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -30,5 +30,6 @@ jobs:
             echo "変化なし"
           else
             git commit -m "Auto-evolve $(date -u +%Y-%m-%d)"
+            git pull --rebase origin main    # ← この行を追加
             git push
           fi
