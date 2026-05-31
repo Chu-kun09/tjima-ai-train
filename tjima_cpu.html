@@ -4033,24 +4033,10 @@ function isCpu(p){ return CPU.enabled && !ONLINE.enabled && Number(p)===Number(C
 
 /* ════════════════ 2. スコアリング用の重み ════════════════ */
 const CPU_W = {
- "body": 0.54,
-    "breaker": 2.95,
-    "aggro": 3.07,
-    "removal": 1.69,
-    "blocker": 1.65,
-    "defenseNeed": 2.55,
-    "link": 3.38,
-    "costEff": 0.19,
-    "freeBonus": 4.06,
-    "extjia": 7.91,
-    "manaHit": 0.43,
-    "sevenChain": 5.65,
-    "mana4": 1.6,
-    "atkShield": 3.24,
-    "atkAggro": 5.46,
-    "stRisk": 0.38,
-    "defShield": 3.28,
-    "bigNum": 0.41,   // 大きい数字（強いカード）を召喚で優先する加点
+  body:0.6, breaker:3.0, aggro:4.0, removal:1.4, blocker:2.5, defenseNeed:3.0,
+  link:4.0, costEff:0.25, freeBonus:3.0, extjia:6.0, manaHit:0.5, sevenChain:5.0,
+  mana4:1.5, atkShield:4.0, atkAggro:5.0, stRisk:0.6, defShield:3.0,
+  bigNum:0.4,   // 大きい数字（強いカード）を召喚で優先する加点
 };
 
 /* ════════════════ 3. 盤面評価・共通ヘルパー ════════════════ */
