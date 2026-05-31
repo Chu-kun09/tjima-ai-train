@@ -3976,26 +3976,40 @@ function cpuEvalBoard(p){
   const aggro=Math.min(1,(5-oppShields)/5+(oppShields===0?0.3:0));
   const enemyThreatens=enUnits.length>0;
   const defenseNeed=((5-myShields)/5)*(enemyThreatens?1:0.3);
-  // 危険度指標: 自分のシールド+ブロッカー - 相手フィールドのブレイク合計
-  // 低いほど即ダイレクトアタックの危機。0以下=即死圏、1=要注意、3以上=安全/有利
-  const oppBreakerTotal=enUnits.reduce((s,c)=>s+cpuBreakerCount(c),0);
+  // ── 危険度指標（次ターンに殴られたときの生存余力）─────────────────────
+  // ポイント: ブロッカーは「相手クリーチャー1体の攻撃」を止める（ブレイク数は無関係）。
+  //   0(トリプルブレイカー)でもブロッカー1体で攻撃自体は防げる。
+  //   よって「相手の攻撃可能クリーチャー数」と「自分のブロッカー数」で止め合い、
+  //   止めきれなかった攻撃のブレイク合計だけシールドが削られる、と計算する。
+  const oppAttackers=enUnits.slice().sort((a,b)=>cpuBreakerCount(b)-cpuBreakerCount(a)); // 大ブレイク順
   let myBlockerCount=me.field.filter(c=>(c.num===1||c.num===3)&&!c.tapped&&(!c.linkedWith||c.linkRoot)).length;
-  // ── 相手の2(ヒラボン)脅威の織り込み ───────────────────────────────────
-  // 相手の場/手札に2があり、こちらに同じ数字(1や3)が複数並ぶと、相手の攻撃前ヒラボンで
-  // 自分のブロッカーをまとめて破壊される恐れがある。自分で2を破壊する手段が無いなら、
-  // 「最も枚数の多いブロッカー番号(1か3)は次ターン消えるかもしれない」と見て防御力から差し引く。
-  const oppHas2=en.field.some(c=>c.num===2)||en.hand.some(c=>c.num===2);
+  // 相手の2(ヒラボン)脅威：同番号で並ぶブロッカーがまとめて破壊される恐れ。
+  // 確率(cpuHirabonThreatProb)で期待損失を見積もり、その分だけブロッカーを割り引く。
   const iCanKill2=me.hand.some(c=>(c.num===2&&canSummon(p,c))||(c.num===6&&canSummon(p,c))||(c.num===7&&canSummon(p,c)));
-  if(oppHas2 && !iCanKill2){
-    const n1=me.field.filter(c=>c.num===1&&!c.tapped&&(!c.linkedWith||c.linkRoot)).length;
-    const n3=me.field.filter(c=>c.num===3&&!c.tapped&&(!c.linkedWith||c.linkRoot)).length;
-    const atRisk=Math.max(n1,n3); // 同じ数字でまとめて破壊される最大枚数
-    if(atRisk>0) myBlockerCount=Math.max(0,myBlockerCount-atRisk); // その分は当てにできない
+  if(!iCanKill2){
+    const hp=cpuHirabonThreatProb(p);          // 0〜0.95
+    if(hp>0.1){
+      const n1=me.field.filter(c=>c.num===1&&!c.tapped&&(!c.linkedWith||c.linkRoot)).length;
+      const n3=me.field.filter(c=>c.num===3&&!c.tapped&&(!c.linkedWith||c.linkRoot)).length;
+      const atRisk=Math.max(n1,n3);             // 同番号でまとめて飛ぶ最大枚数
+      // 確率で割り引く（例: 2が手札に有るかも=0.4 で 2枚並ぶなら 0.8体ぶん割引）
+      myBlockerCount=Math.max(0, myBlockerCount - atRisk*hp);
+    }
   }
-  const dangerLevel=(myShields+myBlockerCount)-oppBreakerTotal;
+  // ブロッカーで止められない攻撃のブレイク合計＝シールドが削られる量
+  // ブロッカーは「最も脅威の大きい攻撃(=ブレイク数の多い0や9)」から優先的に止めると仮定
+  // ヒラボン割引後の端数は切り捨て（確実に止められる数だけカウント）
+  let blockersLeft=Math.floor(myBlockerCount), shieldDamage=0;
+  for(const atk of oppAttackers){
+    if(blockersLeft>0){ blockersLeft--; }       // この攻撃はブロッカーで止める（シールド無傷）
+    else { shieldDamage+=cpuBreakerCount(atk); } // 止めきれない→ブレイク数だけシールドが減る
+  }
+  // dangerLevel = 次ターン攻撃を受けた後に残るシールド枚数（マイナス=シールドが割り切られる=敗北圏）
+  const dangerLevel=myShields-shieldDamage;
+  const oppBreakerTotal=enUnits.reduce((s,c)=>s+cpuBreakerCount(c),0); // 参考値として保持
   return {p,opp,me,en,enUnits,myShields,oppShields,oppCreatureCount:enUnits.length,
           oppUntappedBlockers,oppBiggest,aggro,defenseNeed,avail:availMana(p),
-          dangerLevel,oppBreakerTotal,myBlockerCount,oppHas2Threat:(oppHas2&&!iCanKill2)};
+          dangerLevel,oppBreakerTotal,myBlockerCount,oppHas2Threat:(cpuHirabonThreatProb(p)>0.3&&!iCanKill2)};
 }
 function cpuRemovalValue(card){
   let v=getAtkPower(card);
@@ -4073,8 +4087,8 @@ function cpuScoreCard(p,card,ctx){
     score+=bc*ctx.aggro*CPU_W.aggro;
   }
   // ── 危険度ボーナス ──────────────────────────────────────────────────
-  // dangerLevel = (自分シールド+ブロッカー) - 相手ブレイク合計
-  //   ≤0: 即死危機  1: 要注意  2: 注意  ≥3: 安全/有利
+  // dangerLevel = 次ターン攻撃を受けた後に残るシールド枚数
+  //   ≤0: シールド全壊＝敗北圏  1: 残り1枚で危機  2: 注意  ≥3: 安全/有利
   // defBonus: 防御カード(1/3/2)を危機ほど優先
   // atkBonus: 攻撃カード(7/9/0)を有利ほど優先
   const defBonus  = Math.max(0, (2 - ctx.dangerLevel)) * 8; // 0→16, 1→8, 2→0
@@ -4248,18 +4262,27 @@ function cpuChooseBestPlay(p,minScore=0.5){
 
 /* ════════════════ 5. マナチャージ ════════════════ */
 function cpuKeepValue(p,card,ctx){
+  const earlyGame = ctx.oppCreatureCount===0 && ctx.myShields>=4; // 脅威なし＆自分も無傷＝序盤
   let v;
   switch(card.num){
     case 0: v=100; break;
-    case 7:{ v=8; const o=G.players[p].hand.filter(c=>c.num===7&&c.id!==card.id).length; if(o)v+=6; break; }
+    case 7:{
+      // 7は連鎖前提の高コスト札。手札に複数あるなら全力温存(連鎖要員)。
+      // 1枚しか無い序盤は使いにくいのでチャージ要員に回してよい（keepを下げる）。
+      const others=G.players[p].hand.filter(c=>c.num===7&&c.id!==card.id).length;
+      if(others>=1) v=14;                  // 複数7＝連鎖の核。絶対温存
+      else if(earlyGame) v=2.5;            // 序盤の単騎7はマナ加速に回してよい
+      else v=8;                            // 中盤以降の単騎7は温存寄り
+      break;
+    }
     case 9: v=6; break;
     case 8: v=1.5; break;  // 基本はチャージ要員。終盤のみ召喚する
     case 6: v=4; break;
     case 5: v=G.players[p].field.some(c=>c.num===5)?2:4; break;
-    case 2: v=6; break;
+    case 2: v=earlyGame?7:6; break;        // 除去の要。序盤でも温存
     case 4: v=2.5; break;
-    case 3: v=3+ctx.defenseNeed*3; break;  // ブロッカー：防御必要度に応じて大きく上昇
-    case 1: v=3+ctx.defenseNeed*3; break;  // ブロッカー：同上
+    case 3: v=4+ctx.defenseNeed*3; break;  // ブロッカー：序盤でも最低4で温存寄りに
+    case 1: v=4+ctx.defenseNeed*3; break;  // ブロッカー：同上
     default: v=card.num*0.5;
   }
   return v;
