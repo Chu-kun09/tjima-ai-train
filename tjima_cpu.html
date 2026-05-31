@@ -3959,24 +3959,10 @@ function isCpu(p){ return CPU.enabled && !ONLINE.enabled && Number(p)===Number(C
 
 /* ════════════════ 2. スコアリング用の重み ════════════════ */
 const CPU_W = {
-  "body": 0.54,
-  "breaker": 2.95,
-  "aggro": 3.07,
-  "removal": 1.69,
-  "blocker": 1.65,
-  "defenseNeed": 2.55,
-  "link": 3.38,
-  "costEff": 0.19,
-  "freeBonus": 4.06,
-  "extjia": 7.91,
-  "manaHit": 0.43,
-  "sevenChain": 5.65,
-  "mana4": 1.6,
-  "atkShield": 3.24,
-  "atkAggro": 5.46,
-  "stRisk": 0.38,
-  "defShield": 3.28,
-  "bigNum": 0.41
+  body:0.6, breaker:3.0, aggro:4.0, removal:1.4, blocker:2.5, defenseNeed:3.0,
+  link:4.0, costEff:0.25, freeBonus:3.0, extjia:6.0, manaHit:0.5, sevenChain:5.0,
+  mana4:1.5, atkShield:4.0, atkAggro:5.0, stRisk:0.6, defShield:3.0,
+  bigNum:0.4,   // 大きい数字（強いカード）を召喚で優先する加点
 };
 
 /* ════════════════ 3. 盤面評価・共通ヘルパー ════════════════ */
@@ -4088,6 +4074,27 @@ function cpuHirabonBest(ctx){
 }
 
 /* ════════════════ 4. 召喚カードのスコアリング ════════════════ */
+/* 3,4リンク成立で場全体がスピードアタッカー化したとき、
+ *  「今ターン即攻撃できるようになる味方」の一斉攻撃価値を見積もる。
+ *  リンクしていなければ召喚酔いで攻撃できなかったクリーチャーが、
+ *  リンク成立で即戦力になる＝その分のシールド打点が前倒しで入る。 */
+function cpuLinkBurstValue(p,ctx,newCard){
+  // リンク成立後に攻撃可能になる味方（今は召喚酔いだが、SA化すれば殴れる）
+  // 既に攻撃可能な物は元から数えられているので、「召喚酔いで待機中」のものだけを評価
+  const wakingUp=ctx.me.field.filter(c=>
+    c.summonedThisTurn && !c.speedAttacker && (!c.linkedWith||c.linkRoot)
+  );
+  // 新たに出すこのカード自身もSA化して即攻撃できる
+  const newCardBreak=cpuBreakerCount(newCard);
+  let burstBreak=newCardBreak;
+  wakingUp.forEach(c=>{ burstBreak+=cpuBreakerCount(c); });
+  // 相手のシールド・ブロッカー状況で、その打点がどれだけ価値になるか
+  const effectiveBreak=Math.min(burstBreak, ctx.oppShields+1); // 割り切り＋ダイレクト1
+  if(effectiveBreak<=0)return 0;
+  // 攻撃の後押し（相手シールドが薄いほど高い）。一斉攻撃での押し込み価値。
+  return effectiveBreak*(CPU_W.atkShield*0.5+ctx.aggro*CPU_W.atkAggro*0.4);
+}
+
 function cpuScoreCard(p,card,ctx){
   if(!canSummon(p,card))return {score:-Infinity,plan:null};
   const cost=getSummonCost(p,card);
@@ -4187,20 +4194,50 @@ function cpuScoreCard(p,card,ctx){
       score+=CPU_W.blocker*(0.5+ctx.defenseNeed);
       if(ctx.en.field.some(c=>c.num===0))score+=CPU_W.blocker*2;
       score+=defBonus; // 危機時は最優先で場に出す
-      const can=ctx.me.field.some(c=>c.num===4&&c.color===card.color&&!c.linkedWith)||ctx.me.hand.some(c=>c.num===4&&c.color===card.color);
-      if(can)score+=CPU_W.link; break;
+      // 同色4と組めるか（場に未リンクの同色4 or 手札に同色4）
+      const fieldLink=ctx.me.field.some(c=>c.num===4&&c.color===card.color&&!c.linkedWith);
+      const handLink=ctx.me.hand.some(c=>c.num===4&&c.color===card.color);
+      if(fieldLink||handLink)score+=CPU_W.link;
+      // 定石：3,4リンクが成立すると場全体がスピードアタッカー化＝召喚酔い中の味方も即攻撃可。
+      // 場に「今ターン召喚して攻撃待ち」のクリーチャーが多いほど、一斉攻撃の価値が高い。
+      if(fieldLink){ // この3を出せば即リンク成立（場に同色4がいる）
+        score+=cpuLinkBurstValue(p,ctx,card);
+      }
+      break;
     }
     case 4:{
       score+=1.0;
-      const can=ctx.me.field.some(c=>c.num===3&&c.color===card.color&&!c.linkedWith)||ctx.me.hand.some(c=>c.num===3&&c.color===card.color);
-      if(can)score+=CPU_W.link; break;
+      const fieldLink=ctx.me.field.some(c=>c.num===3&&c.color===card.color&&!c.linkedWith);
+      const handLink=ctx.me.hand.some(c=>c.num===3&&c.color===card.color);
+      if(fieldLink||handLink)score+=CPU_W.link;
+      if(fieldLink){ // この4を出せば即リンク成立（場に同色3がいる）
+        score+=cpuLinkBurstValue(p,ctx,card);
+      }
+      break;
     }
     case 5:{
       const heavy=ctx.me.hand.filter(c=>c.num>=6&&c.num!==card.num).length;
       score+=heavy*0.8;
       const can=ctx.me.field.some(c=>c.num===5&&c.color===card.color&&!c.linkedWith)||ctx.me.hand.some(c=>c.num===5&&c.color===card.color&&c.id!==card.id);
       if(can)score+=CPU_W.link;
-      if(ctx.me.hand.some(c=>c.num===0))score+=2.5;
+      // 定石：5マナで5を出す→コスト−1（5+5なら−5）→残りマナで0や1,2を展開。
+      // 5を出した後の残マナで「追加召喚できる手札カード」が増える価値を見積もる。
+      // 5召喚後の残availを概算（5はコスト5、軽減は他カードに効く）
+      const after5Avail = ctx.avail - getSummonCost(p,card);
+      if(after5Avail>0){
+        // 5がいるとコスト−1。手札の召喚候補が「軽くなって出せる」数を数える
+        let comboValue=0;
+        ctx.me.hand.forEach(c=>{
+          if(c.id===card.id)return;
+          if(c.num===0){ comboValue+=2; }            // 0はコスト0だが5があると墓地回収が付く
+          else {
+            const reduced=Math.max(1,(c.num===8?4:c.num)-1); // 5の軽減後コスト
+            if(reduced<=after5Avail && c.num>=1 && c.num<=3) comboValue+=1.5; // 1,2,3を続けて出せる
+          }
+        });
+        score+=comboValue;
+      }
+      if(ctx.me.hand.some(c=>c.num===0))score+=2.5;   // 手札に0→5を先に出すと墓地回収が使える
       if(inControl)score+=atkBonus*0.3;
       break;
     }
