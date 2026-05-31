@@ -4897,9 +4897,43 @@ function cpuChooseSTPlan(p){
   sts.filter(s=>s.card.num!==6&&s.card.num!==8).forEach(s=>plan.push({id:s.card.id,action:'hand'}));
   return plan;
 }
+// 6(渡辺)の効果で相手フィールドの1枚を手札に戻すときの戻し先選択。
+//  ・自分のシールドが少なく、相手の攻撃を止めきれない（ダイレクトアタックの危険がある）とき：
+//      → これから殴ってくる「未タップの攻撃可能カード」を優先的に戻して攻撃を1体減らす。
+//        ブレイク数の多い脅威（0など）から先に処理する。
+//  ・危険が小さいとき：盤面で最も強い／価値の高いカード（0など）を戻して相手戦力を削ぐ。
+//  ・2(ヒラボン)は戻すと次ターンに召喚時効果（番号指定の全体破壊）を再利用されるため優先度を下げる。
+//    ただし危険時に唯一の脅威が2であれば、生存を優先して戻せるよう加点幅を大きく取る。
 function cpuChoose6Bounce(p,targets){
   if(!targets||!targets.length)return null;
-  return targets.reduce((a,b)=>cpuRemovalValue(a)>=cpuRemovalValue(b)?a:b);
+  const opp=(p===1)?2:1;
+  const myShields=G.players[p].shields.filter(Boolean).length;
+
+  // ST6は防御中（相手の攻撃フェーズ）に誘発する。相手の「まだ攻撃できる」未タップ・非召喚酔いの
+  // カードが今ターンの残り脅威。自分の未タップブロッカー(1・3)は1体につき相手1体の攻撃を止める。
+  const oppAttackers=G.players[opp].field.filter(c=>canAttack(opp,c));
+  let blockersLeft=G.players[p].field.filter(
+    c=>(c.num===1||c.num===3)&&!c.tapped&&(!c.linkedWith||c.linkRoot)).length;
+  // ブロッカーで止めきれない攻撃のブレイク合計＝割られるシールド量（脅威の大きい順から止めると仮定）
+  let incoming=0;
+  oppAttackers.slice().sort((a,b)=>cpuBreakerCount(b)-cpuBreakerCount(a)).forEach(c=>{
+    if(blockersLeft>0){ blockersLeft--; } else { incoming+=cpuBreakerCount(c); }
+  });
+  // 残りシールドを割り切られる（＝ダイレクトアタック圏）なら危険。
+  const inDanger = myShields<=incoming;
+
+  function score(c){
+    let s=cpuRemovalValue(c);                       // 基本：強い/価値の高いカードほど高評価（0など）
+    if(inDanger){
+      // 危険時は今ターンの攻撃を1体減らすのが最優先。
+      // 未タップ（これから殴ってくる）かつブレイク数の多い脅威を最優先で戻す。
+      if(canAttack(opp,c)) s += 100 + cpuBreakerCount(c)*6;
+      else s -= 50;                                 // タップ済み＝今ターンの脅威ではない→後回し
+    }
+    if(c.num===2) s -= 8;                           // 2は戻すと次ターン効果を再利用される→優先度を下げる
+    return s;
+  }
+  return targets.reduce((a,b)=>score(a)>=score(b)?a:b);
 }
 
 /* ════════════════ 8. 統合ループ（CPU=P2 の手番） ════════════════ */
