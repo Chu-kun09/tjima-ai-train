@@ -4113,6 +4113,11 @@ const CPU_W = {
   link:4.0, costEff:0.25, freeBonus:3.0, extjia:6.0, manaHit:0.5, sevenChain:5.0,
   mana4:1.5, atkShield:4.0, atkAggro:5.0, stRisk:0.6, defShield:3.0,
   bigNum:0.4,   // 大きい数字（強いカード）を召喚で優先する加点
+  // ── 追加調整パラメータ（シミュレータで学習可能）──────────────────────
+  exTjiaDeny:3.0,   // 2のヒラボンで相手0を割るときのエクTジア妨害価値（1枚/1色あたり）
+  zeroStackRisk:13, // 0を場に並べたとき2で一掃されるリスク減点の係数
+  takeSingle:1.0,   // シングルブレイカー攻撃を「受け得」と見て消極ブロックする度合い（0で常時ブロック）
+  tripleBlock:0.7,  // 0(トリプル)の攻撃を受けると1枚墓地送りになる損失のブロック加点係数
 };
 
 /* ════════════════ 3. 盤面評価・共通ヘルパー ════════════════ */
@@ -4204,6 +4209,9 @@ function cpuHirabonBest(ctx){
   (ctx.oppUntappedBlockers||[]).forEach(c=>{ blkByNum[c.num]=(blkByNum[c.num]||0)+1; });
   const myAttackers=me.field.filter(c=>!c.tapped&&(!c.summonedThisTurn||c.speedAttacker)&&(!c.linkedWith||c.linkRoot));
   const totalBlockers=(ctx.oppUntappedBlockers||[]).length;
+  // 相手の0(各色)はエクTジア(4色0で即勝ち)の部品。破壊すると相手の勝ち筋を直接潰せるため、
+  // 単なる戦闘力以上の価値がある。相手が何色そろえているかに応じて妨害価値を上乗せする。
+  const oppZeroColors=new Set(en.field.filter(c=>c.num===0).map(c=>c.color));
   for(let n=0;n<=9;n++){
     let oppLoss=0,myLoss=0;
     en.field.forEach(c=>{if(c.num===n)oppLoss+=cpuRemovalValue(c);});
@@ -4212,6 +4220,11 @@ function cpuHirabonBest(ctx){
     me.mana .forEach(c=>{if(c.num===n)myLoss+=cpuRemovalValue(c)*CPU_W.manaHit;});
     if(n===2)myLoss+=2;
     let gain=oppLoss-myLoss;
+    // 相手の0を破壊する場合、エクTジア妨害ボーナスを加算（揃っている色数が多いほど切迫＝高価値）
+    if(n===0 && oppZeroColors.size>0){
+      const zerosKilled=en.field.filter(c=>c.num===0).length;
+      gain += zerosKilled*CPU_W.exTjiaDeny + oppZeroColors.size*CPU_W.exTjiaDeny;
+    }
     // ブロッカー除去で攻撃が通るなら、突破価値を gain に上乗せして宣言番号を選ぶ判断に反映
     if(blkByNum[n] && myAttackers.length){
       const remaining=totalBlockers-blkByNum[n];
@@ -4352,7 +4365,7 @@ function cpuScoreCard(p,card,ctx){
           const threat=cpuHirabonThreatProb(p);  // 0〜0.95（場の2/相手マナ・手札・既出2枚数から推定）
           // 並べるほど（exposed-1）・2が来そうなほど（threat）強く避ける。
           // freeBonusやextjia加点を上回り得る水準（係数13）にして、序盤のまとめ置きを抑止。
-          score-=threat*(exposed-1)*13;
+          score-=threat*(exposed-1)*CPU_W.zeroStackRisk;
         }
       }
       score-=zerosOnField*1; // 従来のまとめ置き微減点（残し）
@@ -4395,18 +4408,27 @@ function cpuScoreCard(p,card,ctx){
       // ── 相手の2を破壊する価値（侮らない）──────────────────────────────
       // 相手の場に2がいると、次ターンの攻撃時ヒラボンで自分のブロッカーや盤面を
       // まとめて壊される。特にシールドが不利なときは最優先で2を消したい。
+      // ただし相手に0(エクTジア部品)など2より価値の高い破壊対象があるなら、
+      // そちらの宣言を優先する。cpuHirabonBestが番号ごとの利益(gain)を持つので、
+      // 「2を宣言したときの利益」と「best(b)の利益」を比較して宣言番号を決める。
       const oppHas2OnField=ctx.en.field.some(c=>c.num===2&&(!c.linkedWith||c.linkRoot));
       let kill2Bonus=0;
       if(oppHas2OnField){
-        // 宣言2で相手の2を破壊できる。自分が不利なほど高評価。
         const disadvantage=Math.max(0, 3-ctx.dangerLevel); // dangerLevelが低いほど大
         kill2Bonus = CPU_W.removal*4 + disadvantage*3;
-        // 宣言番号を2に誘導（相手の2を確実に破壊するため）
-        // ただしब.numが既により大きい利益を示すならそちらを優先
-        if(b.num!==2){
-          // 2を宣言した場合の利益を別途見積もって比較
-          plan.declareNum=2; // 相手の2破壊を優先
+        // 2を宣言したときの実利益を見積もる（相手2破壊 − 自分2巻き添え）。
+        const oppLoss2=ctx.en.field.filter(c=>c.num===2).reduce((s,c)=>s+cpuRemovalValue(c),0)
+                      +ctx.en.mana.filter(c=>c.num===2).reduce((s,c)=>s+cpuRemovalValue(c)*CPU_W.manaHit,0);
+        const myLoss2 =ctx.me.field.filter(c=>c.num===2).reduce((s,c)=>s+cpuRemovalValue(c),0)
+                      +ctx.me.mana.filter(c=>c.num===2).reduce((s,c)=>s+cpuRemovalValue(c)*CPU_W.manaHit,0)+2;
+        const gain2=(oppLoss2-myLoss2)+kill2Bonus; // 2宣言の総合利益（脅威除去ボーナス込み）
+        // best(b)が2でないなら、その利益(b.gain)と2宣言の利益(gain2)を比べて高い方を宣言。
+        // これにより「相手に0がいるのに2を破壊して0を残す」誤りを防ぐ。
+        if(b.num!==2 && gain2>b.gain){
+          plan.declareNum=2;
         }
+        // 実際に宣言する番号が2でないなら、2巻き添え前提のkill2Bonusは加点しない
+        if(plan.declareNum!==2) kill2Bonus=0;
       }
       // ── 相手アタッカー除去の防御価値 ────────────────────────────────────
       // 宣言番号(b.num)で相手フィールドの攻撃可能クリーチャーを破壊できると、
@@ -4885,12 +4907,12 @@ function cpuChooseBlock(p,atk,blockers,opts={}){
 
     // トリプルブレイカー(0)を受けると割られた3枚のうち1枚は墓地送り（手札に加わらない＝札損）。
     // その損失分だけブロック価値を上乗せし、温存したい場面でも受け止めを優先しやすくする。
-    if(!isDirect && atk.num===0) value += sv*0.7;
+    if(!isDirect && atk.num===0) value += sv*CPU_W.tripleBlock;
 
     // 序盤の受け得補正：一方的キル以外は、受けるメリット分を差し引いて消極的にする（シングルのみ）
     if(!isDirect && !oneSidedKill && shieldRoomy && canAffordToTake && passiveTakeOK){
       // 受ければ：ブロッカーを次ターン防御に温存＋シールドから札を得られる
-      const takeBenefit = cpuRemovalValue(B)*0.8 + CPU_W.defShield*0.5;
+      const takeBenefit = (cpuRemovalValue(B)*0.8 + CPU_W.defShield*0.5)*CPU_W.takeSingle;
       // 相手に2がいるなら相討ち/チャンプ後の追撃・効果リスクも上乗せで嫌う
       value -= takeBenefit + (oppHas2 ? 2.0 : 0);
     }
