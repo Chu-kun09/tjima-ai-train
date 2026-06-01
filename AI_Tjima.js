@@ -36,7 +36,7 @@ const args = process.argv.slice(2);
 const htmlArgIdx = args.indexOf('--html');
 // 読み込む本体HTML。--html で明示指定がなければ、同ディレクトリの候補を順に探す。
 function findDefaultHtml() {
-  const candidates = ['tjima_cpu0601.html', 'tjima_cpu.html', 'tjima_cpu_merged.html'];
+  const candidates = ['tjima_cpu.html', 'tjima_cpu_merged.html'];
   for (const name of candidates) {
     const full = path.join(__dirname, name);
     if (fs.existsSync(full)) return full;
@@ -464,7 +464,7 @@ async function main() {
     console.log(JSON.stringify(best, null, 2));
     fs.writeFileSync(RESULT_PATH, JSON.stringify({ best, history, generatedAt: new Date().toISOString() }, null, 2));
     console.log(`\n結果を保存: ${RESULT_PATH}`);
-    console.log('このbestの値を tjima_cpu.html の CPU_W に反映すると学習結果が使えます。');
+    console.log('このbestの値を index1.html の CPU_W に反映すると学習結果が使えます。');
   }
 }
 
