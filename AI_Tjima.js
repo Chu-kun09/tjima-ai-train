@@ -34,10 +34,17 @@ const vm = require('vm');
  * ══════════════════════════════════════════════════════════════════════ */
 const args = process.argv.slice(2);
 const htmlArgIdx = args.indexOf('--html');
-const HTML_PATH = htmlArgIdx >= 0 ? args[htmlArgIdx + 1]
-  : (fs.existsSync(path.join(__dirname, 'tjima_cpu.html'))
-      ? path.join(__dirname, 'tjima_cpu.html')
-      : path.join(__dirname, 'tjima_cpu_merged.html'));
+// 読み込む本体HTML。--html で明示指定がなければ、同ディレクトリの候補を順に探す。
+function findDefaultHtml() {
+  const candidates = ['tjima_cpu0601.html', 'tjima_cpu.html', 'tjima_cpu_merged.html'];
+  for (const name of candidates) {
+    const full = path.join(__dirname, name);
+    if (fs.existsSync(full)) return full;
+  }
+  // 見つからなければ最初の候補名（エラーメッセージ用）
+  return path.join(__dirname, candidates[0]);
+}
+const HTML_PATH = htmlArgIdx >= 0 ? args[htmlArgIdx + 1] : findDefaultHtml();
 const RESULT_PATH = path.join(__dirname, 'AI_Tjima_result.json');
 const MAX_TURNS = 200; // 1ゲームの安全上限（無限ループ防止）
 
@@ -67,6 +74,11 @@ const DEFAULT_PARAMS = {
   stRisk:      0.6,   // ST被弾リスクの軽い減点
   defShield:   3.0,   // 守備側：シールドを守れる価値
   bigNum:      0.4,   // 大きい数字（強カード）の召喚優先
+  // ── 追加調整パラメータ（本体 CPU_W と同期。シミュレータで学習する）──
+  exTjiaDeny:  3.0,   // 2のヒラボンで相手0を割るときのエクTジア妨害価値（1枚/1色あたり）
+  zeroStackRisk: 13,  // 0を場に並べたとき2で一掃されるリスク減点の係数
+  takeSingle:  1.0,   // シングルブレイカー攻撃を「受け得」と見て消極ブロックする度合い（0で常時ブロック）
+  tripleBlock: 0.7,   // 0(トリプル)攻撃を受けると1枚墓地送りになる損失のブロック加点係数
 };
 
 /* ════════════════════════════════════════════════════════════════════════
