@@ -1203,7 +1203,16 @@ function showBlockPicker(atk,p,blockers,attackInfo){
       fxBlock(atk,p,blocker,opp);
       setTimeout(()=>{execCreatureAttack(atk,blocker,p);},600);
     },
-    [{label:'ブロックしない',cls:'r',fn:()=>{closeModal();doShieldBreak(atk,p);}}],
+    [{label:'ブロックしない',cls:'r',fn:()=>{
+      closeModal();
+      // クリーチャーへの攻撃をブロックしない場合は本来の対象とバトル（シールドブレイクではない）
+      if(attackInfo&&attackInfo.type==='creature'&&attackInfo.card){
+        fxAttack(atk,p,attackInfo.card,opp);
+        setTimeout(()=>execCreatureAttack(atk,attackInfo.card,p),500);
+      }else{
+        doShieldBreak(atk,p);
+      }
+    }}],
     opp  // forPlayer = 防御側
   );
 }
@@ -4100,24 +4109,10 @@ function isCpu(p){ return CPU.enabled && !ONLINE.enabled && Number(p)===Number(C
 
 /* ════════════════ 2. スコアリング用の重み ════════════════ */
 const CPU_W = {
-  "body": 0.67,
-  "breaker": 3.25,
-  "aggro": 3.52,
-  "removal": 1.38,
-  "blocker": 2.33,
-  "defenseNeed": 3.91,
-  "link": 3.86,
-  "costEff": 0.32,
-  "freeBonus": 3.1,
-  "extjia": 8.43,
-  "manaHit": 0.46,
-  "sevenChain": 4.65,
-  "mana4": 1.75,
-  "atkShield": 5.13,
-  "atkAggro": 5.41,
-  "stRisk": 0.86,
-  "defShield": 3.54,
-  "bigNum": 0.49
+  body:0.6, breaker:3.0, aggro:4.0, removal:1.4, blocker:2.5, defenseNeed:3.0,
+  link:4.0, costEff:0.25, freeBonus:3.0, extjia:6.0, manaHit:0.5, sevenChain:5.0,
+  mana4:1.5, atkShield:4.0, atkAggro:5.0, stRisk:0.6, defShield:3.0,
+  bigNum:0.4,   // 大きい数字（強いカード）を召喚で優先する加点
 };
 
 /* ════════════════ 3. 盤面評価・共通ヘルパー ════════════════ */
@@ -4343,19 +4338,22 @@ function cpuScoreCard(p,card,ctx){
       }
       if(ctx.me.hand.some(c=>c.num===5&&c.color===card.color&&canSummon(p,c)))score-=5;
       // ── 0の一斉召喚リスク（相手の2による一掃）──────────────────────────
-      // 相手が次ターンに2を出せる可能性が高いほど、0をまとめて場に出すのは危険。
-      // 「場に出す0が増えるほど」「相手が2を持てる状況なほど」減点を強める。
+      // 2(平岡)は「番号を宣言して場・マナの同番号を全破壊」する。一方0は手札に持っている限り
+      // 2の影響を受けず（destroyByNumは手札を対象にしない）、エクTジアは手札+場で判定する。
+      // → 0を場に複数並べる必要性は薄く、並べると1枚の2でまとめて飛ぶリスクだけが大きい。
+      // 「場に並ぶ0の総数」と「相手が2を使える蓋然性(cpuHirabonThreatProbで推定)」に比例して
+      // 強く減点する。相手の2が墓地/マナに出払っていればprobが下がり、まとめ置きも許容される。
       const zerosOnField=ctx.me.field.filter(c=>c.num===0).length;
-      // 相手が2を出せる蓋然性: 場/手札に2が見えていれば確定的、見えなくてもマナと手札があれば可能性
-      const oppCanPlay2Now=ctx.en.field.some(c=>c.num===2)||ctx.en.hand.some(c=>c.num===2);
-      const oppMightDraw2=(ctx.en.hand.length>0)&&(totalMana(ctx.opp)>=2||ctx.en.mana.length>=2);
-      // 4色そろえばエクTジアで即勝ちなので、ラスト1枚(4色目)はリスク無視で出す
+      // 4色目＝エクTジア即勝ちはリスク無視で出す
       const isFinishingColor=!zc.has(card.color)&&(zc.size+1>=4);
       if(!isFinishingColor){
-        let risk=0;
-        if(oppCanPlay2Now) risk=(zerosOnField+1)*4;       // 確定的に2がある→強く分割を促す
-        else if(oppMightDraw2) risk=(zerosOnField)*2;     // 引かれる可能性→場に既に0があるほど控える
-        score-=risk;
+        const exposed=zerosOnField+1;            // この0を出すと場に並ぶ0の総数（=2で同時に失う枚数）
+        if(exposed>=2){                          // 1枚だけなら一掃されても損失は小さい→許容
+          const threat=cpuHirabonThreatProb(p);  // 0〜0.95（場の2/相手マナ・手札・既出2枚数から推定）
+          // 並べるほど（exposed-1）・2が来そうなほど（threat）強く避ける。
+          // freeBonusやextjia加点を上回り得る水準（係数13）にして、序盤のまとめ置きを抑止。
+          score-=threat*(exposed-1)*13;
+        }
       }
       score-=zerosOnField*1; // 従来のまとめ置き微減点（残し）
       if(ctx.me.field.some(c=>c.num===5)&&ctx.me.graveyard.length)score+=1.5;
@@ -5016,9 +5014,37 @@ function cpuAttackStep(p){
       execDirectWithBlock(atk,p,bl);
     }else{
       const t=G.players[opp].field.find(c=>c.id===a.target.card.id);
-      if(t)execCreatureAttack(atk,t,p); else { CPU._busy=false; setTimeout(()=>cpuAttackStep(p),100); }
+      if(t)execCreatureAttackWithBlock(atk,t,p); else { CPU._busy=false; setTimeout(()=>cpuAttackStep(p),100); }
     }
   },550);
+}
+
+// CPUがクリーチャー（タップ済みナンバーズ）を攻撃するとき、防御側にブロックの機会を与える。
+// 従来はexecCreatureAttackを直接呼んでいたため、防御側(人間)のブロッカー(1・3)が
+// アンタップでもブロックモーダルが出ず、5+5リンク等が問答無用で討ち取られていた。
+function execCreatureAttackWithBlock(atk,target,p){
+  const opp=p===1?2:1;
+  // 攻撃対象自身はブロッカーに使えない（タップ済みでもあるため元々対象外だが念のため除外）
+  const blockers=G.players[opp].field.filter(
+    c=>(c.num===1||c.num===3)&&!c.tapped&&(!c.linkedWith||c.linkRoot)&&c.id!==target.id
+  );
+  if(!blockers.length){ fxAttack(atk,p,target,opp); setTimeout(()=>execCreatureAttack(atk,target,p),500); return; }
+  // 防御側もCPUの場合（通常は起きないが保険）：自動でブロック判断
+  if(!ONLINE.enabled && isCpu(opp)){
+    const d=cpuChooseBlock(opp,atk,blockers,{isDirect:false});
+    if(d.block) cpuDoBlock(atk,p,d.blocker,opp);
+    else { fxAttack(atk,p,target,opp); setTimeout(()=>execCreatureAttack(atk,target,p),500); }
+    return;
+  }
+  // 防御側は人間：ブロック確認モーダルを表示（シールド/ダイレクト攻撃と同じ体験）
+  showSimpleModal(`🛡 ${atkLabel(atk)} が ${atkLabel(target)} を攻撃！ ブロックしますか？`,[
+    {label:'ブロックする',cls:'g',fn:()=>{closeModal();showBlockPicker(atk,p,blockers,{type:'creature',card:target});}},
+    {label:'ブロックしない',cls:'r',fn:()=>{
+      closeModal();
+      fxAttack(atk,p,target,opp);
+      setTimeout(()=>execCreatureAttack(atk,target,p),500);
+    }},
+  ],`${atkLabel(atk)}(ATK:${getAtkPower(atk)}) vs ${atkLabel(target)}　ブロッカー: ${blockers.map(c=>CJ[c.color]+c.num).join('/')}`,opp);
 }
 
 /* ════════════════ 9. 既存関数のCPU対応パッチ ════════════════ */
