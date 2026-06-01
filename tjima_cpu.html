@@ -1982,7 +1982,10 @@ function handleOnlinePhase(phase, myP){
               },
               [{label:'ブロックしない',cls:'r',fn:()=>{
                 closeModal();
-                G.onlinePhase='shield-break';
+                const pa=G._pendingAtk;
+                // クリーチャー(ナンバーズ)攻撃なら block-resolve で攻撃側がバトル解決、
+                // それ以外（シールド攻撃）は従来通り shield-break
+                G.onlinePhase=(pa&&pa.targetCreatureId!=null)?'block-resolve':'shield-break';
                 G._blockerId=null;
                 pushState();
                 renderAll();
@@ -1994,6 +1997,13 @@ function handleOnlinePhase(phase, myP){
             const pendingAtk=G._pendingAtk;
             if(pendingAtk&&pendingAtk.isDirect){
               // ダイレクトアタック: ブロックなし確定 → block-resolveで攻撃側が処理
+              G.onlinePhase='block-resolve';
+              G._blockerId=null;
+              pushState();
+              renderAll();
+            }else if(pendingAtk&&pendingAtk.targetCreatureId!=null){
+              // ★バグ修正：クリーチャー(ナンバーズ)攻撃をブロックしない
+              //  → shield-breakではなくblock-resolveで攻撃側が対象クリーチャーとバトル
               G.onlinePhase='block-resolve';
               G._blockerId=null;
               pushState();
@@ -2037,6 +2047,24 @@ function handleOnlinePhase(phase, myP){
         // ブロッカーあり: バトル解決
         G.onlinePhase=null;G._pendingAtk=null;G._blockerId=null;
         execCreatureAttack(atkCard,blocker,p);
+      }else if(atk.targetCreatureId!=null){
+        // ★バグ修正：クリーチャー(ナンバーズ)攻撃をブロックされなかった
+        //  → シールドではなく、選択された対象クリーチャーとバトルする
+        const target=G.players[opp].field.find(c=>c.id==atk.targetCreatureId);
+        if(atkCard&&target){
+          atkCard.tapped=true;
+          if(atkCard.linkedWith)atkCard.linkedWith.tapped=true;
+          G._pendingCreatureAtk={atkId:atk.atkId,targetId:atk.targetCreatureId,attPlayer:p};
+          G.onlinePhase='creature-attack';
+          G._pendingAtk=null;G._blockerId=null;
+          pushState({type:'attack'});
+          fxAttack(atkCard,p,target,opp);
+          setTimeout(()=>execCreatureAttack(atkCard,target,p),500);
+        }else{
+          // 対象/攻撃クリーチャーが見当たらない場合は攻撃継続へ安全に戻す
+          G.onlinePhase='attack-continue';G._pendingAtk=null;G._blockerId=null;
+          pushState();renderAll();
+        }
       }else if(atk.isDirect){
         // ダイレクト: ブロッカーなし → direct-attackをpushして双方に通知
         G.onlinePhase='direct-attack';
@@ -5261,18 +5289,29 @@ if(_origShowSimpleModal){
 // showBlockPickerもCPU向けなら自動でブロッカーを選択
 const _origShowBlockPicker = (typeof showBlockPicker === 'function') ? showBlockPicker : null;
 if(_origShowBlockPicker){
-  showBlockPicker = function(atk, p, blockers){
+  showBlockPicker = function(atk, p, blockers, attackInfo){
     const opp = (p===1)?2:1;
     if(CPU.enabled && !ONLINE.enabled && Number(opp)===Number(CPU.player)){
-      // myShieldsが残っているなら通常のブロック判定、なければダイレクト(必ずブロック)
       const myShields = G.players[opp].shields.filter(Boolean).length;
-      const d = cpuChooseBlock(opp, atk, blockers, { isDirect: myShields===0 });
+      // 攻撃種別を attackInfo から判定（creature=ナンバーズ攻撃 / direct / shield）。
+      // attackInfo が無い場合のみ従来通りシールド数でダイレクト判定にフォールバック。
+      const isCreature = !!(attackInfo && attackInfo.type==='creature' && attackInfo.card);
+      const isDirect   = !!(attackInfo ? attackInfo.type==='direct' : (myShields===0));
+      const d = cpuChooseBlock(opp, atk, blockers, { isDirect });
       if(d.block){
         cpuDoBlock(atk,p,d.blocker,opp);
       }else{
-        // ブロックを選ばない判定 → ダイレクトorシールド攻撃に進める
-        if(myShields===0) execDirectAttack(atk,p);
-        else doShieldBreak(atk,p);
+        // ブロックしない判定 → 本来選ばれた攻撃対象へ正しく解決する
+        if(isCreature){
+          // ★バグ修正：ナンバーズ攻撃はシールドではなく対象クリーチャーとバトルする
+          const target = G.players[opp].field.find(c=>c.id===attackInfo.card.id) || attackInfo.card;
+          fxAttack(atk,p,target,opp);
+          setTimeout(()=>execCreatureAttack(atk,target,p),500);
+        }else if(isDirect){
+          execDirectAttack(atk,p);
+        }else{
+          doShieldBreak(atk,p);
+        }
       }
       return;
     }
