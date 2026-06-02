@@ -4138,15 +4138,28 @@ function isCpu(p){ return CPU.enabled && !ONLINE.enabled && Number(p)===Number(C
 
 /* ════════════════ 2. スコアリング用の重み ════════════════ */
 const CPU_W = {
-  body:0.6, breaker:3.0, aggro:4.0, removal:1.4, blocker:2.5, defenseNeed:3.0,
-  link:4.0, costEff:0.25, freeBonus:3.0, extjia:6.0, manaHit:0.5, sevenChain:5.0,
-  mana4:1.5, atkShield:4.0, atkAggro:5.0, stRisk:0.6, defShield:3.0,
-  bigNum:0.4,   // 大きい数字（強いカード）を召喚で優先する加点
-  // ── 追加調整パラメータ（シミュレータで学習可能）──────────────────────
-  exTjiaDeny:3.0,   // 2のヒラボンで相手0を割るときのエクTジア妨害価値（1枚/1色あたり）
-  zeroStackRisk:13, // 0を場に並べたとき2で一掃されるリスク減点の係数
-  takeSingle:1.0,   // シングルブレイカー攻撃を「受け得」と見て消極ブロックする度合い（0で常時ブロック）
-  tripleBlock:0.7,  // 0(トリプル)の攻撃を受けると1枚墓地送りになる損失のブロック加点係数
+  "body": 0.79,
+  "breaker": 3.71,
+  "aggro": 4.1,
+  "removal": 0.95,
+  "blocker": 3.09,
+  "defenseNeed": 2.37,
+  "link": 5.94,
+  "costEff": 0.24,
+  "freeBonus": 2.4,
+  "extjia": 4.9,
+  "manaHit": 0.37,
+  "sevenChain": 4.06,
+  "mana4": 1.83,
+  "atkShield": 3.01,
+  "atkAggro": 3.47,
+  "stRisk": 0.99,
+  "defShield": 2.87,
+  "bigNum": 0.54,
+  "exTjiaDeny": 2.72,
+  "zeroStackRisk": 10.91,
+  "takeSingle": 0.95,
+  "tripleBlock": 0.58
 };
 
 /* ════════════════ 3. 盤面評価・共通ヘルパー ════════════════ */
