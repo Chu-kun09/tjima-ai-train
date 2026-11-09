@@ -1,89 +1,89 @@
 {
   "best": {
-    "body": 0.8,
-    "breaker": 2.42,
-    "aggro": 3.75,
-    "removal": 1.73,
-    "blocker": 3.12,
-    "defenseNeed": 3.35,
-    "link": 3.66,
-    "costEff": 0.25,
-    "freeBonus": 2.29,
-    "extjia": 6,
-    "manaHit": 0.4,
-    "sevenChain": 3.78,
-    "mana4": 1.5,
-    "atkShield": 3.56,
-    "atkAggro": 5,
-    "stRisk": 0.5,
-    "defShield": 3.79,
-    "bigNum": 0.4,
-    "exTjiaDeny": 2.97,
-    "zeroStackRisk": 15.64,
-    "takeSingle": 1.01,
-    "tripleBlock": 0.77
+    "body": 0.78,
+    "breaker": 3.26,
+    "aggro": 5.49,
+    "removal": 2.32,
+    "blocker": 2.01,
+    "defenseNeed": 3.43,
+    "link": 7.17,
+    "costEff": 0.19,
+    "freeBonus": 3.95,
+    "extjia": 6.27,
+    "manaHit": 0.45,
+    "sevenChain": 7.51,
+    "mana4": 1.83,
+    "atkShield": 3.83,
+    "atkAggro": 3.72,
+    "stRisk": 0.56,
+    "defShield": 3.02,
+    "bigNum": 0.35,
+    "exTjiaDeny": 2.29,
+    "zeroStackRisk": 11.13,
+    "takeSingle": 0.76,
+    "tripleBlock": 0.71
   },
   "history": [
     {
       "gen": 1,
-      "parentRate": 0.506,
-      "childRate": 0.494,
+      "parentRate": 0.514,
+      "childRate": 0.486,
       "adopted": false
     },
     {
       "gen": 2,
-      "parentRate": 0.53,
-      "childRate": 0.47,
+      "parentRate": 0.512,
+      "childRate": 0.488,
       "adopted": false
     },
     {
       "gen": 3,
-      "parentRate": 0.442,
-      "childRate": 0.558,
+      "parentRate": 0.492,
+      "childRate": 0.508,
       "adopted": true
     },
     {
       "gen": 4,
-      "parentRate": 0.496,
-      "childRate": 0.504,
+      "parentRate": 0.494,
+      "childRate": 0.506,
       "adopted": true
     },
     {
       "gen": 5,
-      "parentRate": 0.514,
-      "childRate": 0.486,
-      "adopted": false
+      "parentRate": 0.49,
+      "childRate": 0.51,
+      "adopted": true
     },
     {
       "gen": 6,
-      "parentRate": 0.514,
-      "childRate": 0.486,
-      "adopted": false
-    },
-    {
-      "gen": 7,
       "parentRate": 0.496,
       "childRate": 0.504,
       "adopted": true
     },
     {
+      "gen": 7,
+      "parentRate": 0.492,
+      "childRate": 0.508,
+      "adopted": true
+    },
+    {
       "gen": 8,
-      "parentRate": 0.532,
-      "childRate": 0.468,
-      "adopted": false
+      "parentRate": 0.492,
+      "childRate": 0.508,
+      "adopted": true
     },
     {
       "gen": 9,
-      "parentRate": 0.514,
-      "childRate": 0.486,
-      "adopted": false
+      "parentRate": 0.494,
+      "childRate": 0.506,
+      "adopted": true
     },
     {
       "gen": 10,
-      "parentRate": 0.508,
-      "childRate": 0.492,
+      "parentRate": 0.524,
+      "childRate": 0.476,
       "adopted": false
     }
   ],
-  "generatedAt": "2026-11-08T10:36:55.337Z"
+  "generatedAt": "2026-11-09T11:44:53.162Z"
 }
